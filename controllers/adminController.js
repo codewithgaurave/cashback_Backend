@@ -289,8 +289,8 @@ exports.generateQRCodes = async (req, res) => {
       // Create a unique hash format code: SKU-timestamp-randomHex
       const randomHex = crypto.randomBytes(6).toString('hex').toUpperCase();
       const codeString = `${product.sku}-${now}-${randomHex}`;
-      // Clean, concise 8-character uppercase short code for easy manual typing
-      const shortCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+      // Clean, concise 6-character uppercase short code for easy manual typing (e.g. A3F92C)
+      const shortCode = crypto.randomBytes(3).toString('hex').toUpperCase();
 
       generatedCodes.push({
         code: codeString,

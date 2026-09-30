@@ -100,8 +100,17 @@ exports.register = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error('REGISTER ERROR:', error.name, error.message, error.code || '');
+    // Return specific message for duplicate phone
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: 'Phone number already registered.' });
+    }
+    // Return validation errors clearly
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message).join(', ');
+      return res.status(400).json({ success: false, message: messages });
+    }
+    return res.status(500).json({ success: false, message: `Server error: ${error.message}` });
   }
 };
 
