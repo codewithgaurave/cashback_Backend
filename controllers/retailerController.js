@@ -211,12 +211,13 @@ exports.scanQRCode = async (req, res) => {
     }
 
     const trimmedCode = code.trim();
+    const escapedCode = trimmedCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     const initialQR = await QRCode.findOne({
       $or: [
         { code: trimmedCode },
         { shortCode: trimmedCode.toUpperCase() },
-        { code: { $regex: `${trimmedCode}$`, $options: 'i' } }
+        { code: { $regex: escapedCode, $options: 'i' } }
       ]
     }).populate('productId');
     

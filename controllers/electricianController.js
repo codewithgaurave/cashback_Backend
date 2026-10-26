@@ -60,13 +60,14 @@ exports.scanQRCode = async (req, res) => {
     }
 
     const trimmedCode = code.trim();
+    const escapedCode = trimmedCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // 2. Fetch the QR Code details (supports full code, shortCode, or end suffix)
+    // 2. Fetch the QR Code details (supports full code, shortCode, prefix, or substring)
     const initialQR = await QRCode.findOne({
       $or: [
         { code: trimmedCode },
         { shortCode: trimmedCode.toUpperCase() },
-        { code: { $regex: `${trimmedCode}$`, $options: 'i' } }
+        { code: { $regex: escapedCode, $options: 'i' } }
       ]
     });
 
