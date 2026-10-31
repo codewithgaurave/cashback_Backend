@@ -4,6 +4,39 @@ const QRCode = require('../models/QRCode');
 const Wallet = require('../models/Wallet');
 const mongoose = require('mongoose');
 
+// Helper: Auto-generate the next sequential Sales Referral Code (e.g. SP1001, SP1002...)
+const generateNextSalesCode = async () => {
+  const allSalesPersons = await SalesPerson.find({}, 'code').lean();
+  let maxNum = 1000;
+
+  allSalesPersons.forEach((sp) => {
+    if (sp.code) {
+      const match = sp.code.match(/(\d+)$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    }
+  });
+
+  return `SP${maxNum + 1}`;
+};
+
+// @desc    Get next sequential sales person code
+// @route   GET /api/admin/sales-persons/next-code
+// @access  Private (Admin only)
+exports.getNextSalesCode = async (req, res) => {
+  try {
+    const nextCode = await generateNextSalesCode();
+    return res.status(200).json({ success: true, nextCode });
+  } catch (error) {
+    console.error('getNextSalesCode error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 // @desc    Create a new Sales Person
 // @route   POST /api/admin/sales-persons
 // @access  Private (Admin only)
@@ -11,11 +44,15 @@ exports.createSalesPerson = async (req, res) => {
   try {
     let { name, code, phone, email, city, area, notes } = req.body;
 
-    if (!name || !code) {
-      return res.status(400).json({ success: false, message: 'Please provide Sales Person Name and Code' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Please provide Sales Person Name' });
     }
 
-    code = code.trim().toUpperCase();
+    if (!code || !code.trim()) {
+      code = await generateNextSalesCode();
+    } else {
+      code = code.trim().toUpperCase();
+    }
 
     // Check if code already exists
     const existing = await SalesPerson.findOne({ code });

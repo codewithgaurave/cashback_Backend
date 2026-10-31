@@ -57,6 +57,7 @@ const {
   getWithdrawals,
   bulkProcessWithdrawals,
   processWithdrawal,
+  updateWithdrawalRemarks,
   bulkUploadWithdrawalUTRs,
   getAppConfig,
   updateAppConfig,
@@ -103,6 +104,7 @@ router.post('/change-password', changePassword);
 const {
   createSalesPerson,
   getSalesPersons,
+  getNextSalesCode,
   getSalesPersonById,
   getSalesPersonUsers,
   updateSalesPerson,
@@ -120,6 +122,7 @@ router.put('/users/:id/kyc-process', processKYC);
 router.put('/users/:id/kyc', kycUpload, uploadUserKYC);
 
 // Sales Persons Management & Drill-down
+router.get('/sales-persons/next-code', getNextSalesCode);
 router.post('/sales-persons', createSalesPerson);
 router.get('/sales-persons', getSalesPersons);
 router.get('/sales-persons/:id', getSalesPersonById);
@@ -145,6 +148,7 @@ router.get('/withdrawals', getWithdrawals);
 router.post('/withdrawals/bulk-processing', bulkProcessWithdrawals);
 router.post('/withdrawals/bulk-upload-utr', bulkUploadWithdrawalUTRs);
 router.put('/withdrawals/:id/process', processWithdrawal);
+router.put('/withdrawals/:id/remarks', updateWithdrawalRemarks);
 
 // Website Content / App config Management
 router.get('/app-config', getAppConfig);

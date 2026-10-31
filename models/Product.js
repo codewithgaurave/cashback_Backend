@@ -9,8 +9,13 @@ const ProductSchema = new mongoose.Schema(
     },
     sku: {
       type: String,
-      required: [true, 'Please add a product SKU'],
+      required: [true, 'Please add a product HSN / SKU code'],
       trim: true,
+    },
+    hsnCode: {
+      type: String,
+      trim: true,
+      default: '',
     },
     barcode: {
       type: String,
@@ -20,6 +25,11 @@ const ProductSchema = new mongoose.Schema(
       sparse: true,
     },
     size: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    gstCategory: {
       type: String,
       trim: true,
       default: '',

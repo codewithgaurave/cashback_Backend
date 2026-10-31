@@ -175,10 +175,12 @@ exports.processKYC = async (req, res) => {
 // @access  Private (Admin only)
 exports.addProduct = async (req, res) => {
   try {
-    const { name, sku, barcode, category, description, size, cashbackConfig } = req.body;
+    const { name, sku, hsnCode, barcode, category, description, size, gstCategory, cashbackConfig } = req.body;
+    const finalCode = (hsnCode || sku || '').trim();
+    const finalGst = (gstCategory || size || '').trim();
 
-    if (!name || !sku || !barcode || !category) {
-      return res.status(400).json({ success: false, message: 'Please provide name, sku, barcode, and category' });
+    if (!name || !finalCode || !barcode || !category) {
+      return res.status(400).json({ success: false, message: 'Please provide name, HSN code, barcode, and category' });
     }
 
     const productExists = await Product.findOne({ barcode });
@@ -188,11 +190,13 @@ exports.addProduct = async (req, res) => {
 
     const product = await Product.create({
       name,
-      sku,
+      sku: finalCode,
+      hsnCode: finalCode,
       barcode,
       category,
       description,
-      size,
+      size: finalGst,
+      gstCategory: finalGst,
       cashbackConfig,
     });
 
@@ -228,7 +232,19 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
+    const updatePayload = { ...req.body };
+    if (updatePayload.hsnCode && !updatePayload.sku) {
+      updatePayload.sku = updatePayload.hsnCode;
+    } else if (updatePayload.sku && !updatePayload.hsnCode) {
+      updatePayload.hsnCode = updatePayload.sku;
+    }
+    if (updatePayload.gstCategory && !updatePayload.size) {
+      updatePayload.size = updatePayload.gstCategory;
+    } else if (updatePayload.size && !updatePayload.gstCategory) {
+      updatePayload.gstCategory = updatePayload.size;
+    }
+
+    const product = await Product.findByIdAndUpdate(req.params.id, updatePayload, {
       new: true,
       runValidators: true,
     });
@@ -397,7 +413,13 @@ exports.getWithdrawals = async (req, res) => {
     let query = {};
 
     if (status && status !== 'all') {
-      query.status = status;
+      if (status === 'paid') {
+        query.status = { $in: ['approved', 'paid'] };
+      } else if (status === 'pending') {
+        query.status = { $in: ['pending', 'processing'] };
+      } else {
+        query.status = status;
+      }
     }
 
     if (startDate || endDate) {
@@ -634,6 +656,31 @@ exports.processWithdrawal = async (req, res) => {
   }
 };
 
+// @desc    Update admin remarks on withdrawal
+// @route   PUT /api/admin/withdrawals/:id/remarks
+// @access  Private (Admin only)
+exports.updateWithdrawalRemarks = async (req, res) => {
+  try {
+    const { adminRemarks } = req.body;
+    const withdrawal = await Withdrawal.findById(req.params.id);
+    if (!withdrawal) {
+      return res.status(404).json({ success: false, message: 'Withdrawal record not found' });
+    }
+
+    withdrawal.adminRemarks = adminRemarks !== undefined ? adminRemarks.trim() : withdrawal.adminRemarks;
+    await withdrawal.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Admin remarks updated successfully',
+      withdrawal,
+    });
+  } catch (error) {
+    console.error('updateWithdrawalRemarks error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 // @desc    Bulk Upload / Update Bank Transaction (UTR) Numbers for Withdrawals
 // @route   POST /api/admin/withdrawals/bulk-upload-utr
 // @access  Private (Admin only)
@@ -859,20 +906,35 @@ exports.updateServiceRequestAdmin = async (req, res) => {
 // @access  Private (Admin only)
 exports.sendBulkNotification = async (req, res) => {
   try {
-    const { targetRole, title, message } = req.body; // targetRole: 'electrician', 'retailer', or 'all'
+    const { targetRole, title, message, phoneNumbers } = req.body; // targetRole: 'electrician', 'retailer', 'custom', or 'all'
 
     if (!title || !message) {
       return res.status(400).json({ success: false, message: 'Please provide notification title and message' });
     }
 
     let filter = {};
-    if (targetRole && ['electrician', 'retailer'].includes(targetRole)) {
+    if (phoneNumbers && (Array.isArray(phoneNumbers) ? phoneNumbers.length > 0 : String(phoneNumbers).trim() !== '')) {
+      const phonesList = Array.isArray(phoneNumbers)
+        ? phoneNumbers.map(p => String(p).trim()).filter(Boolean)
+        : String(phoneNumbers).split(/[\n,]/).map(p => p.trim()).filter(Boolean);
+      
+      if (phonesList.length > 0) {
+        filter.phone = { $in: phonesList };
+      }
+    } else if (targetRole && ['electrician', 'retailer'].includes(targetRole)) {
       filter.role = targetRole;
     } else {
       filter.role = { $in: ['electrician', 'retailer'] };
     }
 
-    const users = await User.find(filter).select('_id fcmToken');
+    const users = await User.find(filter).select('_id fcmToken phone name');
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No registered users found matching the given target audience / phone numbers',
+      });
+    }
+
     const notificationsToInsert = users.map((user) => ({
       userId: user._id,
       title,
@@ -1418,9 +1480,11 @@ exports.bulkAddProducts = async (req, res) => {
     const errors = [];
 
     for (const prodData of products) {
-      const { name, sku, barcode, category, description, size, electricianAmount, retailerAmount, isActive } = prodData;
+      const { name, sku, hsnCode, barcode, category, description, size, gstCategory, electricianAmount, retailerAmount, isActive } = prodData;
+      const finalCode = (hsnCode || sku || '').trim();
+      const finalGst = (gstCategory || size || '').trim();
 
-      if (!name || !sku || !barcode || !category) {
+      if (!name || !finalCode || !barcode || !category) {
         skippedCount++;
         errors.push(`Skipped "${name || 'Unnamed'}": Missing required fields`);
         continue;
@@ -1435,11 +1499,13 @@ exports.bulkAddProducts = async (req, res) => {
 
       await Product.create({
         name,
-        sku,
+        sku: finalCode,
+        hsnCode: finalCode,
         barcode,
         category,
         description: description || '',
-        size: size || '',
+        size: finalGst,
+        gstCategory: finalGst,
         cashbackConfig: {
           electricianAmount: Number(electricianAmount) || 0,
           retailerAmount: Number(retailerAmount) || 0,
