@@ -81,6 +81,12 @@ const UserSchema = new mongoose.Schema(
       uppercase: true,
       default: '',
     },
+    customUserId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      sparse: true,
+    },
     fcmToken: {
       type: String,
       default: '',
@@ -97,8 +103,53 @@ const UserSchema = new mongoose.Schema(
   }
 );
 
-// Encrypt password before saving
+// Helper to generate next sequential user ID (EL1001 for electrician, RT1001 for retailer)
+UserSchema.statics.generateNextUserId = async function (role) {
+  const prefix = role === 'retailer' ? 'RT' : 'EL';
+  const regex = new RegExp(`^${prefix}(\\d+)$`);
+  const existingUsers = await this.find(
+    { customUserId: { $regex: `^${prefix}\\d+` } },
+    'customUserId'
+  ).lean();
+
+  let maxNum = 1000;
+  for (const u of existingUsers) {
+    if (u.customUserId) {
+      const match = u.customUserId.match(regex);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    }
+  }
+  return `${prefix}${maxNum + 1}`;
+};
+
+// Helper to ensure existing users have customUserId assigned
+UserSchema.statics.ensureUsersHaveCustomId = async function () {
+  try {
+    const usersWithoutId = await this.find({
+      role: { $in: ['electrician', 'retailer'] },
+      $or: [{ customUserId: { $exists: false } }, { customUserId: null }, { customUserId: '' }],
+    }).sort({ createdAt: 1 });
+
+    for (const u of usersWithoutId) {
+      u.customUserId = await this.generateNextUserId(u.role);
+      await u.save();
+    }
+  } catch (err) {
+    console.error('ensureUsersHaveCustomId error:', err);
+  }
+};
+
+// Pre-save hook: Auto-generate customUserId and encrypt password
 UserSchema.pre('save', async function () {
+  if (!this.customUserId && (this.role === 'electrician' || this.role === 'retailer')) {
+    this.customUserId = await this.constructor.generateNextUserId(this.role);
+  }
+
   if (!this.isModified('password')) {
     return;
   }

@@ -66,6 +66,9 @@ exports.register = async (req, res) => {
       profileImageUrl = `/uploads/${req.file.filename}`;
     }
 
+    const assignedRole = role || 'electrician';
+    const autoUserId = await User.generateNextUserId(assignedRole);
+
     // Create user
     const user = await User.create({
       name,
@@ -73,9 +76,10 @@ exports.register = async (req, res) => {
       email,
       firmName,
       password,
-      role: role || 'electrician',
+      role: assignedRole,
+      customUserId: autoUserId,
       profileImage: profileImageUrl,
-      shopDetails: role === 'retailer' ? shopDetails : undefined,
+      shopDetails: assignedRole === 'retailer' ? shopDetails : undefined,
       salesPerson: salesPersonId,
       salesCode: validSalesCode,
       isActive: true, // User can log in immediately; scanning and withdrawals are protected by KYC status
@@ -92,6 +96,7 @@ exports.register = async (req, res) => {
       message: 'Registration successful. Please log in to complete your KYC verification.',
       user: {
         id: user._id,
+        customUserId: user.customUserId,
         name: user.name,
         phone: user.phone,
         role: user.role,
@@ -139,6 +144,7 @@ exports.login = async (req, res) => {
       token: generateToken(user._id),
       user: {
         id: user._id,
+        customUserId: user.customUserId,
         name: user.name,
         phone: user.phone,
         role: user.role,

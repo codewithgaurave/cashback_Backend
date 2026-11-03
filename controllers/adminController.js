@@ -58,6 +58,9 @@ exports.getDashboardStats = async (req, res) => {
 // @access  Private (Admin only)
 exports.getUsers = async (req, res) => {
   try {
+    // Ensure all existing electricians and retailers have customUserId
+    await User.ensureUsersHaveCustomId();
+
     const { role, kycStatus } = req.query;
     let query = { role: { $in: ['electrician', 'retailer'] } };
 
@@ -409,6 +412,9 @@ exports.getQRCodes = async (req, res) => {
 // @access  Private (Admin only)
 exports.getWithdrawals = async (req, res) => {
   try {
+    // Ensure all existing electricians and retailers have customUserId
+    await User.ensureUsersHaveCustomId();
+
     const { status, startDate, endDate, search } = req.query;
     let query = {};
 
@@ -423,27 +429,29 @@ exports.getWithdrawals = async (req, res) => {
     }
 
     if (startDate || endDate) {
-      query.createdAt = {};
+      const dateField = (status === 'paid') ? 'processedAt' : 'createdAt';
+      query[dateField] = {};
       if (startDate) {
         const start = new Date(startDate);
         start.setHours(0, 0, 0, 0);
-        query.createdAt.$gte = start;
+        query[dateField].$gte = start;
       }
       if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = end;
+        query[dateField].$lte = end;
       }
     }
 
     let withdrawals = await Withdrawal.find(query)
-      .populate('userId', 'name phone email role firmName bankDetails salesCode salesPerson')
+      .populate('userId', 'name phone email role firmName bankDetails salesCode salesPerson customUserId')
       .populate('approvedOrRejectedBy', 'name phone role')
       .sort({ createdAt: -1 });
 
     if (search) {
       const q = search.toLowerCase();
       withdrawals = withdrawals.filter((w) => {
+        const customId = w.userId?.customUserId?.toLowerCase() || '';
         const userName = w.userId?.name?.toLowerCase() || '';
         const userPhone = w.userId?.phone || '';
         const bankName = w.bankSnapshot?.bankName?.toLowerCase() || '';
@@ -452,6 +460,7 @@ exports.getWithdrawals = async (req, res) => {
         const ifsc = w.bankSnapshot?.ifscCode?.toLowerCase() || '';
         const txnNo = w.transactionNumber?.toLowerCase() || '';
         return (
+          customId.includes(q) ||
           userName.includes(q) ||
           userPhone.includes(q) ||
           bankName.includes(q) ||
@@ -712,7 +721,25 @@ exports.bulkUploadWithdrawalUTRs = async (req, res) => {
         withdrawal = await Withdrawal.findById(rawId);
       }
 
-      // 2. Fallback match by Account Number + Amount if ID was not matched
+      // 2. Match by User Unique ID (e.g. EL1001, RT1001)
+      const userUniqueId = item.userUniqueId || item.customUserId || item['User Unique ID'];
+      if (!withdrawal && userUniqueId) {
+        const cleanUid = userUniqueId.toString().trim().toUpperCase();
+        const matchedUser = await User.findOne({ customUserId: cleanUid });
+        if (matchedUser) {
+          const uQuery = {
+            userId: matchedUser._id,
+            status: { $in: ['pending', 'processing'] },
+          };
+          const amt = Number(item.amount);
+          if (!isNaN(amt) && amt > 0) {
+            uQuery.amount = amt;
+          }
+          withdrawal = await Withdrawal.findOne(uQuery);
+        }
+      }
+
+      // 3. Fallback match by Account Number + Amount if ID was not matched
       if (!withdrawal && item.accountNumber) {
         const cleanAcc = item.accountNumber.toString().trim();
         const amt = Number(item.amount);
@@ -914,12 +941,25 @@ exports.sendBulkNotification = async (req, res) => {
 
     let filter = {};
     if (phoneNumbers && (Array.isArray(phoneNumbers) ? phoneNumbers.length > 0 : String(phoneNumbers).trim() !== '')) {
-      const phonesList = Array.isArray(phoneNumbers)
-        ? phoneNumbers.map(p => String(p).trim()).filter(Boolean)
-        : String(phoneNumbers).split(/[\n,]/).map(p => p.trim()).filter(Boolean);
+      const rawList = Array.isArray(phoneNumbers)
+        ? phoneNumbers
+        : String(phoneNumbers).split(/[\n,;\t]/);
       
-      if (phonesList.length > 0) {
-        filter.phone = { $in: phonesList };
+      const cleanPhones = rawList
+        .map(p => {
+          const digits = String(p).replace(/\D/g, '');
+          if (digits.length === 10) return digits;
+          if (digits.length > 10 && (digits.startsWith('91') || digits.startsWith('0'))) {
+            return digits.slice(-10);
+          }
+          return digits;
+        })
+        .filter(p => p.length === 10);
+      
+      const uniquePhones = Array.from(new Set(cleanPhones));
+
+      if (uniquePhones.length > 0) {
+        filter.phone = { $in: uniquePhones };
       }
     } else if (targetRole && ['electrician', 'retailer'].includes(targetRole)) {
       filter.role = targetRole;
