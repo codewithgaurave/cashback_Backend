@@ -131,13 +131,13 @@ UserSchema.statics.generateNextUserId = async function (role) {
 UserSchema.statics.ensureUsersHaveCustomId = async function () {
   try {
     const usersWithoutId = await this.find({
-      role: { $in: ['electrician', 'retailer'] },
       $or: [{ customUserId: { $exists: false } }, { customUserId: null }, { customUserId: '' }],
     }).sort({ createdAt: 1 });
 
     for (const u of usersWithoutId) {
-      u.customUserId = await this.generateNextUserId(u.role);
-      await u.save();
+      const targetRole = u.role === 'retailer' ? 'retailer' : 'electrician';
+      const nextId = await this.generateNextUserId(targetRole);
+      await this.updateOne({ _id: u._id }, { $set: { customUserId: nextId } });
     }
   } catch (err) {
     console.error('ensureUsersHaveCustomId error:', err);
